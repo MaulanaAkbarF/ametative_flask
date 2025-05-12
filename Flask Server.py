@@ -1,62 +1,89 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import pickle
 import numpy as np
 import os
+import firebase_admin
+from firebase_admin import credentials, firestore
+import xgboost as xgb
 
 app = Flask(__name__)
 
 current_dir = os.getcwd()
 
-with open(os.path.join('Machine_Learning','Models','Model_SKLearn_XGB.pkl'), 'rb') as f:
+# Load the model and encoder
+with open(os.path.join('Machine_Learning', 'Models', 'Model_SKLearn_XGB_VARK.pkl'), 'rb') as f:
     model = pickle.load(f)
 
-with open(os.path.join('Machine_Learning', 'Models','Encoder_sex.pkl'), 'rb') as f:
-    le_sex = pickle.load(f)
+# Load the model
+# with open(os.path.join('Models', 'ID3_Model.pkl'), 'rb') as f_id3:
+#     model_id3 = pickle.load(f_id3)
 
-with open(os.path.join('Machine_Learning', 'Models','Encoder_chest_pain_type.pkl'), 'rb') as f:
-    le_chest_pain_type = pickle.load(f)
-    
-with open(os.path.join('Machine_Learning', 'Models','Encoder_resting_ecg.pkl'), 'rb') as f:
-    le_resting_ecg = pickle.load(f)
+with open(os.path.join('Machine_Learning', 'Models', 'Encoder_Result.pkl'), 'rb') as f:
+    le_result = pickle.load(f)
 
-with open(os.path.join('Machine_Learning', 'Models','Encoder_exercise_angina.pkl'), 'rb') as f:
-    le_exercise_angina = pickle.load(f)
+# Initialize Firebase
+cred = credentials.Certificate(os.path.join(current_dir, "firebase_credential.json"))
+firebase_admin.initialize_app(cred)
+firestore_db = firestore.client()
 
-with open(os.path.join('Machine_Learning', 'Models','Encoder_st_slope.pkl'), 'rb') as f:
-    le_st_slope = pickle.load(f)
-
-with open(os.path.join('Machine_Learning', 'Models','Encoder_hasil.pkl'), 'rb') as f:
-    le_hasil = pickle.load(f)
+feature_names = ['Visual', 'Auditory', 'Read/Write', 'Kinesthetic']
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    data = request.json
-    age = data['age']
-    sex = 0.0 if data['sex'] == 'M' else 1.0
-    chest_pain_type = 0.0 if data['chest_pain_type'] == 'ATA' else 1.0 if data['chest_pain_type'] == 'NAP' else 2.0 if data['chest_pain_type'] == 'ASY' else 3.0
-    resting_bp = data['resting_bp']
-    cholesterol = data['cholesterol']
-    fasting_bs = data['fasting_bs']
-    resting_ecg = 0.0 if data['resting_ecg'] == 'Normal' else 1.0 if data['resting_ecg'] == 'ST' else 2.0
-    max_hr = data['max_hr']
-    exercise_angina = 0.0 if data['exercise_angina'] == 'N' else 1.0
-    oldpeak = data['oldpeak']
-    st_slope = 0.0 if data['st_slope'] == 'Up' else 1.0
+    try:
+        data = request.json
+        required_keys = ['Visual', 'Auditory', 'Read/Write', 'Kinesthetic', 'Email']
+        if not all(key in data for key in required_keys):
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        visual = data['Visual']
+        auditory = data['Auditory']
+        read_write = data['Read/Write']
+        kinesthetic = data['Kinesthetic']
+        email = data['Email']
+        
+        X = np.array([visual, auditory, read_write, kinesthetic]).reshape(1, -1)
+        X_dmatrix = xgb.DMatrix(X, feature_names=feature_names)
+        
+        pred = model.predict(X_dmatrix)
+        result = le_result.inverse_transform([int(pred[0])])[0]
+        
+        doc_ref = firestore_db.collection('Predict_XGBoost').document(email)
+        doc_ref.set({
+            'visual': visual,
+            'auditory': auditory,
+            'readwrite': read_write,
+            'kinesthetic': kinesthetic,
+            'result': result
+        }, merge=True)
+        
+        return jsonify({'Result': result})
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-    X = np.array([age, sex, chest_pain_type, resting_bp, cholesterol, fasting_bs, resting_ecg, max_hr, exercise_angina, oldpeak, st_slope]).reshape(1, -1)
-    pred = model.predict(X)
+# @app.route('/predict_id3', methods=['POST'])
+# def predict_id3():
+#     data = request.json
+#     km_class = data['km_class']
+#     rm_class = data['rm_class']
+#     sample = {"km_class": km_class, "rm_class": rm_class}
+#     prediction = predict(model_id3, sample)
+#     return jsonify({'Prediction': prediction})
+
+# def predict(tree, sample):
+#     if not isinstance(tree, dict):
+#         return str(tree)
     
-    hasil = le_hasil.inverse_transform(pred)[0]
+#     root = next(iter(tree))
+#     if root in sample:
+#         value = sample[root]
+#         if value in tree[root]:
+#             return predict(tree[root][value], sample)
     
-    return {'hasil': hasil.tolist()}
+#     return "1"
 
 if __name__ == '__main__':
     app.run(debug=True)
 
-# Contoh perintah yang bisa kamu coba di Command Prompt/terminal:
-
-# Prediksi Hasil: 1
-# curl -X POST -H "Content-Type: application/json" -d "{\"age\": 48, \"sex\": \"F\", \"chest_pain_type\": \"NAP\", \"resting_bp\": 159, \"cholesterol\": 181, \"fasting_bs\": 0, \"resting_ecg\": \"Normal\", \"max_hr\": 157, \"exercise_angina\": \"N\", \"oldpeak\": 1, \"st_slope\": \"Flat\"}" http://localhost:5000/predict
-
-# Prediksi Hasil: 0
-# curl -X POST -H "Content-Type: application/json" -d "{\"age\": 39, \"sex\": \"M\", \"chest_pain_type\": \"NAP\", \"resting_bp\": 121, \"cholesterol\": 338, \"fasting_bs\": 0, \"resting_ecg\": \"Normal\", \"max_hr\": 169, \"exercise_angina\": \"N\", \"oldpeak\": 0, \"st_slope\": \"Up\"}" http://localhost:5000/predict
+# conth curl untuk endpoint /predict: curl -X POST -H "Content-Type: application/json" -d "{\"Email\": \"test1@gmail.com\", \"Visual\": 5, \"Auditory\": 3, \"Read/Write\": 4, \"Kinesthetic\": 6}" http://localhost:5000/predict
