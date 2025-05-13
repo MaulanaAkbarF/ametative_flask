@@ -2,31 +2,33 @@ from flask import Flask, request, jsonify
 import pickle
 import numpy as np
 import os
-import firebase_admin
-from firebase_admin import credentials, firestore
+# import firebase_admin
+# from firebase_admin import credentials, firestore
 import xgboost as xgb
 
 app = Flask(__name__)
 
 current_dir = os.getcwd()
 
-# Load the model and encoder
-with open(os.path.join('Machine_Learning', 'Models', 'Model_SKLearn_XGB_VARK.pkl'), 'rb') as f:
-    model = pickle.load(f)
+with open(os.path.join('Machine_Learning', 'Models', 'Model_SKLearn_XGB_VARK.pkl'), 'rb') as f: model = pickle.load(f)
+with open(os.path.join('Machine_Learning', 'Models', 'Encoder_Result.pkl'), 'rb') as f: le_result = pickle.load(f)
+# with open(os.path.join('Models', 'ID3_Model.pkl'), 'rb') as f_id3: model_id3 = pickle.load(f_id3)
 
-# Load the model
-# with open(os.path.join('Models', 'ID3_Model.pkl'), 'rb') as f_id3:
-#     model_id3 = pickle.load(f_id3)
-
-with open(os.path.join('Machine_Learning', 'Models', 'Encoder_Result.pkl'), 'rb') as f:
-    le_result = pickle.load(f)
-
-# Initialize Firebase
-cred = credentials.Certificate(os.path.join(current_dir, "firebase_credential.json"))
-firebase_admin.initialize_app(cred)
-firestore_db = firestore.client()
+# cred = credentials.Certificate(os.path.join(current_dir, "firebase_credential.json"))
+# firebase_admin.initialize_app(cred)
+# firestore_db = firestore.client()
 
 feature_names = ['Visual', 'Auditory', 'Read/Write', 'Kinesthetic']
+
+@app.route('/')
+def home():
+    return """
+    <h1>Selamat Datang di VARK Prediction API</h1>
+    <p>Server ini berhasil dijalankan dan siap menerima request prediksi!</p>
+    <p>Anda bisa melakukan request ke endpoint: <code>/predict</code> menggunakan metode POST untuk membuat prediksi.</p>
+    <p>Contoh <code>curl</code> yang bisa Anda coba melalui CMD: 
+    </p><code>curl -X POST -H "Content-Type: application/json" -d "{\"Email\": \"test@gmail.com\", \"Visual\": 5, \"Auditory\": 3, \"Read/Write\": 4, \"Kinesthetic\": 6}" http://localhost:5000/predict</code></p>
+    """
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -48,14 +50,14 @@ def predict():
         pred = model.predict(X_dmatrix)
         result = le_result.inverse_transform([int(pred[0])])[0]
         
-        doc_ref = firestore_db.collection('Predict_XGBoost').document(email)
-        doc_ref.set({
-            'visual': visual,
-            'auditory': auditory,
-            'readwrite': read_write,
-            'kinesthetic': kinesthetic,
-            'result': result
-        }, merge=True)
+        # doc_ref = firestore_db.collection('Predict_XGBoost').document(email)
+        # doc_ref.set({
+        #     'visual': visual,
+        #     'auditory': auditory,
+        #     'readwrite': read_write,
+        #     'kinesthetic': kinesthetic,
+        #     'result': result
+        # }, merge=True)
         
         return jsonify({'Result': result})
     
